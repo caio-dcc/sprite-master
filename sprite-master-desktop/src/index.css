@@ -1,0 +1,144 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
+
+*, ::before, ::after { box-sizing: border-box; }
+
+:root {
+  background-color: #020617;
+  color: #f1f5f9;
+  color-scheme: dark;
+}
+
+body {
+  margin: 0;
+  padding: 0;
+  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  background: #020617;
+  color: #f1f5f9;
+}
+
+#root { min-height: 100vh; }
+
+/* ---- Scrollbar ---- */
+::-webkit-scrollbar { width: 5px; height: 5px; }
+::-webkit-scrollbar-track { background: #020617; }
+::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #3b82f6; }
+
+/* ---- Checkerboard bg for transparent sprites ---- */
+.sprite-grid-bg {
+  background-image:
+    linear-gradient(45deg, #1e293b 25%, transparent 25%),
+    linear-gradient(-45deg, #1e293b 25%, transparent 25%),
+    linear-gradient(45deg, transparent 75%, #1e293b 75%),
+    linear-gradient(-45deg, transparent 75%, #1e293b 75%);
+  background-size: 10px 10px;
+  background-position: 0 0, 0 5px, 5px -5px, -5px 0px;
+}
+
+/* ---- Custom range slider ---- */
+.custom-range {
+  -webkit-appearance: none;
+  height: 6px;
+  background: #334155;
+  border-radius: 5px;
+  outline: none;
+  width: 100%;
+  cursor: pointer;
+}
+.custom-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 16px;
+  height: 16px;
+  background: #3b82f6;
+  border-radius: 50%;
+  cursor: pointer;
+  border: 2px solid #1e293b;
+}
+
+/* ---- Loader ---- */
+#global-loader {
+  display: none;
+  position: fixed;
+  inset: 0;
+  background: rgba(2, 6, 23, 0.92);
+  z-index: 9999;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  backdrop-filter: blur(10px);
+}
+#global-loader.active { display: flex; }
+
+.loading-spin {
+  border: 3px solid rgba(255,255,255,0.1);
+  border-top: 3px solid #3b82f6;
+  border-radius: 50%;
+  width: 24px;
+  height: 24px;
+  animation: spin 1s linear infinite;
+  margin-bottom: 2rem;
+  transform: scale(2.5);
+}
+
+@keyframes spin { 0%{ transform: scale(2.5) rotate(0deg); } 100%{ transform: scale(2.5) rotate(360deg); } }
+@keyframes pulse { 50%{ opacity: 0.5; } }
+.animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
+
+/* ---- Excluded frame ---- */
+.excluded-frame {
+  opacity: 0.25;
+  filter: grayscale(1);
+}
+
+/* ---- Guide lines overlay ---- */
+.guide-lines {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  z-index: 10;
+}
+.guide-lines::before {
+  content: '';
+  position: absolute;
+  bottom: 10%;
+  left: 0; right: 0;
+  height: 1px;
+  background: rgba(16, 185, 129, 0.7);
+}
+.guide-lines::after {
+  content: '';
+  position: absolute;
+  top: 0; bottom: 0;
+  left: 50%;
+  width: 1px;
+  background: rgba(16, 185, 129, 0.7);
+}
+
+/* ---- Frame card drag ---- */
+.frame-card {
+  cursor: grab;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+.frame-card:active { cursor: grabbing; }
+.frame-card.drag-over {
+  outline: 2px solid #3b82f6;
+  transform: scale(1.04);
+}
+.frame-card.dragging { opacity: 0.4; }
+.frame-card.excluded-frame { pointer-events: auto !important; cursor: default; }
+
+/* ---- Button reset util ---- */
+button { cursor: pointer; font-family: inherit; }
+input, select, textarea { font-family: inherit; }
+
+.frame-card:hover .frame-delete-btn {
+  opacity: 1 !important;
+}
+
+.frame-card:not(.excluded-frame):hover .frame-edit-hint {
+  opacity: 1 !important;
+  background: rgba(59,130,246,0.15) !important;
+}
+
