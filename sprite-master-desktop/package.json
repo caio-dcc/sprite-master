@@ -8,7 +8,25 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "preview": "vite preview"
+    "package": "npm run build && electron-builder build --win"
+  },
+  "build": {
+    "appId": "com.spritemaster.ultra",
+    "productName": "Sprite Master Ultra",
+    "directories": {
+      "output": "dist-build"
+    },
+    "win": {
+      "target": "portable",
+      "forceCodeSigning": false,
+      "verifyUpdateCodeSignature": false,
+      "signingHashAlgorithms": []
+    },
+    "files": [
+      "dist/**/*",
+      "dist-electron/**/*",
+      "package.json"
+    ]
   },
   "dependencies": {
     "@imgly/background-removal": "^1.7.0",

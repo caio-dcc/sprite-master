@@ -14,8 +14,6 @@ export default defineConfig({
       preload: {
         input: path.join(__dirname, 'electron/preload.ts'),
       },
-      // Removing renderer: {} as it might be causing dependency resolution issues
-      // and we primarily use standard Web APIs for this app.
     }),
   ],
 })

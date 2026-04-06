@@ -5,7 +5,6 @@
 import { useState, useCallback, useRef } from 'react';
 import {
   magicBackgroundRemoval,
-  aiBackgroundRemoval,
   applyNoiseFilter,
   applyBleedFilter,
   applyEdgeBlur,
@@ -123,55 +122,21 @@ export function useSpriteProcessor() {
     setTimeout(() => {
       setFrames(prev => prev.map(f => {
         if (f.deleted) return f;
-        const proc = cloneCanvas(f.originalCanvas);
-        magicBackgroundRemoval(proc, magicTolerance);
+        
+        // Update both the current canvas AND the original backup
+        const newOriginal = cloneCanvas(f.originalCanvas);
+        magicBackgroundRemoval(newOriginal, magicTolerance);
+        
+        const proc = cloneCanvas(newOriginal);
         applyFilters(proc, params);
-        return { ...f, canvas: proc };
+        
+        return { ...f, originalCanvas: newOriginal, canvas: proc };
       }));
       setIsProcessing(false);
       if (loader) loader.classList.remove('active');
     }, 50);
   }, [magicTolerance]);
 
-  // ── AI background removal (neural network via @imgly/background-removal) ──
-  const [aiProgress, setAiProgress] = useState(0);
-  const [isAiProcessing, setIsAiProcessing] = useState(false);
-
-  const runAiBgRemoval = useCallback(async (params: GridParams) => {
-    setIsAiProcessing(true);
-    setAiProgress(0);
-    const loader = document.getElementById('global-loader');
-    const loaderText = document.getElementById('loader-text');
-    const loaderSub  = document.getElementById('loader-subtext');
-    if (loader) loader.classList.add('active');
-    if (loaderText) loaderText.textContent = 'Removendo Fundo com IA...';
-    if (loaderSub)  loaderSub.textContent  = 'Carregando modelo neural (primeira vez pode demorar)...';
-
-    try {
-      const updated: FrameState[] = [];
-      const active = frames.filter(f => !f.deleted);
-      for (let i = 0; i < active.length; i++) {
-        const f = active[i];
-        if (loaderText) loaderText.textContent = `IA: Frame ${i + 1} / ${active.length}...`;
-        const src = cloneCanvas(f.originalCanvas);
-        const resultCanvas = await aiBackgroundRemoval(src, (p) => setAiProgress(p));
-        applyFilters(resultCanvas, params);
-        updated.push({ ...f, canvas: resultCanvas });
-      }
-      // Merge results back
-      setFrames(prev => prev.map(f => {
-        const upd = updated.find(u => u.index === f.index);
-        return upd ?? f;
-      }));
-    } catch (err) {
-      console.error('AI removal failed:', err);
-      alert('Erro no modo IA. Verifique a conexão ou use o modo mágico algortmico.');
-    } finally {
-      setIsAiProcessing(false);
-      setAiProgress(0);
-      if (loader) loader.classList.remove('active');
-    }
-  }, [frames]);
 
   // ── Auto-fix flicker: re-process all frames with stabilize=100 ──
   const runAutoFixFlicker = useCallback((params: GridParams) => {
@@ -253,7 +218,7 @@ export function useSpriteProcessor() {
   // ── Update a single frame's canvas (after editor save) ──
   const updateFrameCanvas = useCallback((index: number, newCanvas: HTMLCanvasElement) => {
     setFrames(prev => prev.map(f =>
-      f.index === index ? { ...f, canvas: newCanvas } : f
+      f.index === index ? { ...f, canvas: newCanvas, originalCanvas: cloneCanvas(newCanvas) } : f
     ));
   }, []);
 
@@ -280,6 +245,69 @@ export function useSpriteProcessor() {
     }));
   }, []);
 
+  // ── Fill to 30 Frames (random selection from active) ──
+  const fillTo30Frames = useCallback(() => {
+    setFrames(prev => {
+      const active = prev.filter(f => !f.deleted);
+      if (active.length === 0 || active.length >= 30) return prev;
+
+      const needed = 30 - active.length;
+      const newClones: FrameState[] = [];
+
+      for (let i = 0; i < needed; i++) {
+        const randomSource = active[Math.floor(Math.random() * active.length)];
+        newClones.push({
+          ...randomSource,
+          canvas: cloneCanvas(randomSource.canvas),
+          originalCanvas: cloneCanvas(randomSource.originalCanvas),
+          index: Date.now() + i + 1000, 
+          name: `frame_fill_rnd_${i}.png`,
+          excluded: false,
+          deleted: false,
+        });
+      }
+
+      return [...prev, ...newClones];
+    });
+  }, []);
+
+  // ── Composite a Secondary Layer (Accessory) ──
+  const compositeLayer = useCallback((img: HTMLImageElement, options: { magic: boolean, magicTol: number, ox: number, oy: number }) => {
+    setIsProcessing(true);
+    // Use a small timeout to let the UI update (showing processing overlay)
+    setTimeout(() => {
+      setFrames(prev => prev.map(f => {
+        if (f.deleted) return f;
+        
+        // 1. Extract the accessory slice using the same coordinates as the base frame
+        const accCanvas = buildCellCanvas(img, f.x, f.y, f.width, f.height);
+        
+        // 2. Optional: Magic Background Removal on the accessory slice
+        if (options.magic) {
+          magicBackgroundRemoval(accCanvas, options.magicTol);
+        }
+        
+        // 3. Draw onto existing canvases (active and original buffer)
+        const ctx = f.canvas.getContext('2d')!;
+        ctx.imageSmoothingEnabled = false;
+        ctx.drawImage(accCanvas, options.ox, options.oy);
+        
+        const oCtx = f.originalCanvas.getContext('2d')!;
+        oCtx.imageSmoothingEnabled = false;
+        oCtx.drawImage(accCanvas, options.ox, options.oy);
+        
+        return { ...f };
+      }));
+      setIsProcessing(false);
+    }, 50);
+  }, []);
+
+  // ── Reset entire processor ──
+  const clearAll = useCallback(() => {
+    setSourceImage(null);
+    setFrames([]);
+  }, []);
+
   // active (non-deleted) frames for display
   const activeFrames = frames.filter(f => !f.deleted);
   const deletedFrames = frames.filter(f => f.deleted);
@@ -292,15 +320,15 @@ export function useSpriteProcessor() {
     activeFrames,
     deletedFrames,
     isProcessing,
-    isAiProcessing,
-    aiProgress,
     magicTolerance, setMagicTolerance,
     showGuidelines, setShowGuidelines,
     processSlices,
     reprocessFrames,
     runMagicBgRemoval,
-    runAiBgRemoval,
     runAutoFixFlicker,
+    fillTo30Frames,
+    compositeLayer,
+    clearAll,
     toggleExclusion,
     deleteFrame,
     restoreFrame,

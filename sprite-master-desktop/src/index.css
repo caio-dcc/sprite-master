@@ -1,144 +1,124 @@
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;600;800&display=swap');
-
-*, ::before, ::after { box-sizing: border-box; }
+/* ────────────────────────────────────────────────────────────
+   index.css – Global "Shadow Master" Styles
+   ──────────────────────────────────────────────────────────── */
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Serif:wght@400;700&display=swap');
 
 :root {
-  background-color: #020617;
-  color: #f1f5f9;
-  color-scheme: dark;
+  --bg-deep: #020202;
+  --bg-panel: #050505;
+  --bg-hover: #0a0a0a;
+  --text-primary: #ffffff;
+  --text-dim: #555555;
+  --text-muted: #222222;
+  --accent: #ffffff;
+  --border: #111111;
+  --glass: rgba(255, 255, 255, 0.03);
 }
 
 body {
   margin: 0;
-  padding: 0;
-  font-family: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+  font-family: 'IBM Plex Serif', serif;
+  background-color: var(--bg-deep);
+  color: var(--text-primary);
   -webkit-font-smoothing: antialiased;
-  background: #020617;
-  color: #f1f5f9;
+  overflow: hidden;
 }
 
-#root { min-height: 100vh; }
+.text-mono {
+  font-family: 'IBM Plex Serif', serif;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
 
 /* ---- Scrollbar ---- */
-::-webkit-scrollbar { width: 5px; height: 5px; }
-::-webkit-scrollbar-track { background: #020617; }
-::-webkit-scrollbar-thumb { background: #1e293b; border-radius: 10px; }
-::-webkit-scrollbar-thumb:hover { background: #3b82f6; }
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: #1a1a1a; border-radius: 10px; }
+::-webkit-scrollbar-thumb:hover { background: #333; }
 
-/* ---- Checkerboard bg for transparent sprites ---- */
-.sprite-grid-bg {
-  background-image:
-    linear-gradient(45deg, #1e293b 25%, transparent 25%),
-    linear-gradient(-45deg, #1e293b 25%, transparent 25%),
-    linear-gradient(45deg, transparent 75%, #1e293b 75%),
-    linear-gradient(-45deg, transparent 75%, #1e293b 75%);
-  background-size: 10px 10px;
-  background-position: 0 0, 0 5px, 5px -5px, -5px 0px;
+/* ---- Layout Components ---- */
+.glass-panel {
+  background: var(--glass);
+  border: 1px solid var(--border);
+  border-radius: 16px;
+  backdrop-filter: blur(10px);
 }
 
-/* ---- Custom range slider ---- */
+.sidebar-nav-item {
+  transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+}
+.sidebar-nav-item:hover {
+  background: var(--glass);
+  padding-left: 28px !important;
+}
+
+/* ---- Animations ---- */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slideRight {
+  from { opacity: 0; transform: translateX(-20px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+/* ---- Custom Sliders ---- */
 .custom-range {
   -webkit-appearance: none;
-  height: 6px;
-  background: #334155;
-  border-radius: 5px;
+  appearance: none;
+  height: 2px;
+  background: var(--border);
   outline: none;
   width: 100%;
-  cursor: pointer;
 }
 .custom-range::-webkit-slider-thumb {
   -webkit-appearance: none;
-  width: 16px;
-  height: 16px;
-  background: #3b82f6;
+  appearance: none;
+  width: 10px;
+  height: 10px;
+  background: var(--text-primary);
   border-radius: 50%;
   cursor: pointer;
-  border: 2px solid #1e293b;
+  box-shadow: 0 0 10px rgba(255,255,255,0.2);
 }
 
-/* ---- Loader ---- */
-#global-loader {
-  display: none;
-  position: fixed;
-  inset: 0;
-  background: rgba(2, 6, 23, 0.92);
-  z-index: 9999;
-  flex-direction: column;
-  align-items: center;
-  justify-content: center;
-  backdrop-filter: blur(10px);
-}
-#global-loader.active { display: flex; }
-
-.loading-spin {
-  border: 3px solid rgba(255,255,255,0.1);
-  border-top: 3px solid #3b82f6;
-  border-radius: 50%;
-  width: 24px;
-  height: 24px;
-  animation: spin 1s linear infinite;
-  margin-bottom: 2rem;
-  transform: scale(2.5);
+/* ---- Sprite Grid background (Chessboard) ---- */
+.sprite-grid-bg {
+  background-image: 
+    linear-gradient(45deg, #050505 25%, transparent 25%), 
+    linear-gradient(-45deg, #050505 25%, transparent 25%), 
+    linear-gradient(45deg, transparent 75%, #050505 75%), 
+    linear-gradient(-45deg, transparent 75%, #050505 75%);
+  background-size: 16px 16px;
+  background-position: 0 0, 0 8px, 8px -8px, -8px 0px;
+  background-color: #020202;
 }
 
-@keyframes spin { 0%{ transform: scale(2.5) rotate(0deg); } 100%{ transform: scale(2.5) rotate(360deg); } }
-@keyframes pulse { 50%{ opacity: 0.5; } }
-.animate-pulse { animation: pulse 2s cubic-bezier(0.4, 0, 0.6, 1) infinite; }
-
-/* ---- Excluded frame ---- */
-.excluded-frame {
-  opacity: 0.25;
-  filter: grayscale(1);
-}
-
-/* ---- Guide lines overlay ---- */
-.guide-lines {
-  position: absolute;
-  inset: 0;
-  pointer-events: none;
-  z-index: 10;
-}
-.guide-lines::before {
-  content: '';
-  position: absolute;
-  bottom: 10%;
-  left: 0; right: 0;
-  height: 1px;
-  background: rgba(16, 185, 129, 0.7);
-}
-.guide-lines::after {
-  content: '';
-  position: absolute;
-  top: 0; bottom: 0;
-  left: 50%;
-  width: 1px;
-  background: rgba(16, 185, 129, 0.7);
-}
-
-/* ---- Frame card drag ---- */
-.frame-card {
-  cursor: grab;
-  transition: all 0.15s ease;
-  user-select: none;
-}
-.frame-card:active { cursor: grabbing; }
-.frame-card.drag-over {
-  outline: 2px solid #3b82f6;
-  transform: scale(1.04);
-}
-.frame-card.dragging { opacity: 0.4; }
-.frame-card.excluded-frame { pointer-events: auto !important; cursor: default; }
-
-/* ---- Button reset util ---- */
-button { cursor: pointer; font-family: inherit; }
-input, select, textarea { font-family: inherit; }
-
+/* ---- Frame Cards ---- */
 .frame-card:hover .frame-delete-btn {
   opacity: 1 !important;
 }
-
-.frame-card:not(.excluded-frame):hover .frame-edit-hint {
+.frame-card:hover .frame-edit-hint {
   opacity: 1 !important;
-  background: rgba(59,130,246,0.15) !important;
+  background: rgba(0,0,0,0.4) !important;
 }
 
+/* ---- Switch Style (Toggle) ---- */
+.switch { position: relative; display: inline-block; width: 34px; height: 18px; }
+.switch input { opacity: 0; width: 0; height: 0; }
+.slider {
+  position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0;
+  background-color: #111; transition: .4s; border-radius: 34px; border: 1px solid #222;
+}
+.slider:before {
+  position: absolute; content: ""; height: 10px; width: 10px; left: 3px; bottom: 3px;
+  background-color: #444; transition: .4s; border-radius: 50%;
+}
+input:checked + .slider { background-color: #fff; border-color: #fff; }
+input:checked + .slider:before { transform: translateX(16px); background-color: #000; }

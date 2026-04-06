@@ -1,577 +1,616 @@
 // ────────────────────────────────────────────────────────────
-// App.tsx  –  Sprite Master Ultra Desktop
-// Full faithful port of SpriteMasterUltra (5).html
+// App.tsx  –  Unified Dashboard (Slicer + Inline Editor)
 // ────────────────────────────────────────────────────────────
-import { useState, useEffect, useCallback, useRef } from 'react';
-import { useSpriteProcessor } from './hooks/useSpriteProcessor';
+import { useState, useEffect, useRef, useCallback } from 'react';
+import { useSpriteProcessor, type FrameState } from './hooks/useSpriteProcessor';
 import type { GridParams } from './utils/imageProcessing';
 import { FrameGrid } from './components/FrameGrid';
 import { AnimationPreview } from './components/AnimationPreview';
-import { FrameEditorModal } from './components/FrameEditorModal';
-import { GeneratorTab } from './components/GeneratorTab';
 import JSZip from 'jszip';
 
-// Grid presets matching the HTML
-const GRID_PRESETS: { label: string; cols: number; rows: number }[] = [
-  { label: 'Grade 4x4 (16)',      cols: 4,  rows: 4 },
-  { label: 'Grade 6x3 (18)',      cols: 6,  rows: 3 },
-  { label: 'Grade 3x6 (18)',      cols: 3,  rows: 6 },
-  { label: 'Grade 4x3 (12)',      cols: 4,  rows: 3 },
-  { label: 'Grade 3x4 (12)',      cols: 3,  rows: 4 },
-  { label: 'Fita 8x2 (16)',       cols: 8,  rows: 2 },
-  { label: 'Horizontal 16x1',     cols: 16, rows: 1 },
+const GRID_PRESETS = [
+  { label: 'Grade 3x4 (10)', cols: 3, rows: 4 },
+  { label: 'Grade 4x4 (16)', cols: 4, rows: 4 },
+  { label: 'Grade 5x4 (20)', cols: 5, rows: 4 },
+  { label: 'Grade 6x3 (18)', cols: 6, rows: 3 },
+  { label: 'Grade 8x2 (16)', cols: 8, rows: 2 },
+  { label: 'Horizontal 16x1', cols: 16, rows: 1 },
 ];
 
 export default function App() {
   const sp = useSpriteProcessor();
-
   const [params, setParams] = useState<GridParams>({
-    width: 100, height: 100,
-    overlapX: 0, overlapY: 0,
-    offsetX: 0,  offsetY: 0,
-    columns: 4,  rows: 4,
-    noise: 0, bleed: 1, blur: 0, outline: 0, stabilize: 50,
+    width: 64, height: 64, overlapX: 0, overlapY: 0, offsetX: 0, offsetY: 0,
+    columns: 4, rows: 4, noise: 0, bleed: 1, blur: 0, outline: 0, stabilize: 50,
   });
 
-  const [objName,    setObjName]    = useState('');
-  const [actionName, setActionName] = useState('');
-  const [exportFormat, setExportFormat] = useState<'image/png' | 'image/jpeg' | 'image/webp'>('image/png');
-  const [magicIntensity, setMagicIntensity] = useState<15 | 30 | 50>(30);
-  const [currentTab, setCurrentTab] = useState<'slicer' | 'generator'>('slicer');
-  const [editingIndex, setEditingIndex] = useState<number | null>(null);
-  const [globalPrompt, setGlobalPrompt]   = useState('');
+  const [editingIdx, setEditingIdx] = useState<number | null>(null);
+  const [magicIntensity, setMagicIntensity] = useState<15 | 30 | 50>(50);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [actionName, setActionName] = useState('idle');
+  const [layerOffsetX, setLayerOffsetX] = useState(0);
+  const [layerOffsetY, setLayerOffsetY] = useState(0);
+  const [autoRemoveLayerBg, setAutoRemoveLayerBg] = useState(true);
   const fileRef = useRef<HTMLInputElement>(null);
+  const accessoryRef = useRef<HTMLInputElement>(null);
 
-  // Re-process whenever image or params change
+  // Editor states
+  const [tool, setTool] = useState<'brush' | 'eraser' | 'colorEraser' | 'eyedropper'>('brush');
+  const [brushSize, setBrushSize] = useState(12);
+  const [brushColor, setBrushColor] = useState('#ffffff');
+  const [tolerance, setTolerance] = useState(30);
+
+  // Processing with loading indicator
   useEffect(() => {
-    if (sp.sourceImage) sp.processSlices(params);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
+    if (!sp.sourceImage) return;
+    setIsProcessing(true);
+    const t = setTimeout(() => {
+      sp.processSlices(params);
+      setIsProcessing(false);
+    }, 50);
+    return () => clearTimeout(t);
   }, [sp.sourceImage, params]);
 
-  // Compute cell size whenever image or grid preset changes
-  const applyPreset = useCallback((cols: number, rows: number) => {
-    if (!sp.sourceImage) return;
-    setParams(p => ({
-      ...p,
-      columns: cols, rows,
-      width:  Math.floor(sp.sourceImage!.width  / cols),
-      height: Math.floor(sp.sourceImage!.height / rows),
-    }));
-  }, [sp.sourceImage]);
+  const activeSpriteInfo = sp.sourceImage 
+    ? `${sp.sourceImage.width}x${sp.sourceImage.height} PX | ${sp.activeFrames.length} Frames` 
+    : 'Nenhum Sprite Carregado';
 
-  const handleGridSelect = (e: React.ChangeEvent<HTMLSelectElement>) => {
-    const [cols, rows] = e.target.value.split(',').map(Number);
-    if (sp.sourceImage) applyPreset(cols, rows);
-    else setParams(p => ({ ...p, columns: cols, rows }));
+  const downloadZip = async () => {
+    const zip = new JSZip();
+    const folder = zip.folder(actionName);
+    const active = sp.activeFrames.filter(f => !f.excluded);
+
+    for (let i = 0; i < active.length; i++) {
+        const f = active[i];
+        const blob = await new Promise<Blob|null>(r => f.canvas.toBlob(r, 'image/png'));
+        if (blob) folder?.file(`${i}.png`, blob);
+    }
+    const content = await zip.generateAsync({ type: 'blob' });
+    const a = document.createElement('a'); a.href = URL.createObjectURL(content); a.download = `${actionName || 'sprites'}.zip`; a.click();
   };
 
-  // Auto-detect grid (simple heuristic)
+  const applyPreset = useCallback((cols: number, rows: number) => {
+    if (!sp.sourceImage) return;
+    setParams(p => ({ ...p, columns: cols, rows, width: Math.floor(sp.sourceImage!.width / cols), height: Math.floor(sp.sourceImage!.height / rows) }));
+  }, [sp.sourceImage]);
+
   const detectGridIA = useCallback(() => {
     if (!sp.sourceImage) return;
     const w = sp.sourceImage.width, h = sp.sourceImage.height;
-    // Find best divisor for a roughly-square cell
-    let bestCols = 4, bestRows = 4;
-    let bestScore = Infinity;
+    let bestCols = 4, bestRows = 4, bestScore = Infinity;
     for (const { cols, rows } of GRID_PRESETS) {
-      const cw = w / cols, ch = h / rows;
-      const score = Math.abs(cw - ch); // prefer square cells
+      const score = Math.abs(w / cols - h / rows);
       if (score < bestScore) { bestScore = score; bestCols = cols; bestRows = rows; }
     }
     applyPreset(bestCols, bestRows);
   }, [sp.sourceImage, applyPreset]);
 
-  // File import
-  const triggerImport = () => fileRef.current?.click();
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  const upParam = (k: keyof GridParams, v: number) => setParams(p => ({ ...p, [k]: v }));
+
+  const handleAccessoryFile = (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
-    if (file) sp.loadFile(file);
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (loadEv) => {
+      const img = new Image();
+      img.onload = () => {
+        sp.compositeLayer(img, { 
+          magic: autoRemoveLayerBg, 
+          magicTol: magicIntensity, 
+          ox: layerOffsetX, 
+          oy: layerOffsetY 
+        });
+      };
+      img.src = loadEv.target?.result as string;
+    };
+    reader.readAsDataURL(file);
+    e.target.value = ''; 
   };
-  const handleDrop = useCallback((e: React.DragEvent<HTMLDivElement>) => {
-    e.preventDefault();
-    const file = e.dataTransfer.files?.[0];
-    if (file) sp.loadFile(file);
-  }, [sp]);
 
-  // Export ZIP
-  const downloadZip = useCallback(async () => {
-    const activeActive = sp.activeFrames.filter(f => !f.excluded);
-    if (activeActive.length === 0) return;
-
-    const zip = new JSZip();
-    const ext = exportFormat === 'image/png' ? 'png'
-              : exportFormat === 'image/jpeg' ? 'jpg'
-              : 'webp';
-    const prefix = objName && actionName ? `${objName}_${actionName}_`
-                 : objName              ? `${objName}_`
-                 : actionName           ? `${actionName}_`
-                 : '';
-
-    for (let i = 0; i < activeActive.length; i++) {
-      const frame = activeActive[i];
-      const blob = await new Promise<Blob | null>(res =>
-        frame.canvas.toBlob(res, exportFormat)
-      );
-      if (blob) zip.file(`${prefix}${String(i).padStart(2,'0')}.${ext}`, blob);
-    }
-
-    const content = await zip.generateAsync({ type: 'blob' });
-    const url = URL.createObjectURL(content);
-    const a = document.createElement('a');
-    a.href = url; a.download = `${prefix || 'sprites'}.zip`;
-    a.click();
-    URL.revokeObjectURL(url);
-  }, [sp.activeFrames, exportFormat, objName, actionName]);
-
-  // Range value update shortcuts
-  const upParam = (k: keyof GridParams, v: number) =>
-    setParams(p => ({ ...p, [k]: v }));
-
-  const hasImage = !!sp.sourceImage;
-  const frameCount = sp.activeFrames.length;
-  const cellLabel  = hasImage
-    ? `${sp.sourceImage!.width}x${sp.sourceImage!.height} PX • ${frameCount} Quadros`
-    : '–';
-
+  const editorActive = editingIdx !== null;
   return (
-    <div style={{ background: '#020617', minHeight: '100vh', color: '#f1f5f9' }}>
-      {/* ── Global Loader ── */}
-      <div id="global-loader">
-        <div className="loading-spin" />
-        <div style={{ textAlign: 'center', maxWidth: 300 }}>
-          <p style={{ color: '#60a5fa', fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.3em', fontSize: 12 }}
-             className="animate-pulse">
-            Limpando Fundo Mágico...
-          </p>
-          <p style={{ color: '#64748b', fontSize: 10, textTransform: 'uppercase', marginTop: 16, lineHeight: 1.6 }}>
-            A preencher e apagar de fora para dentro...
-          </p>
-        </div>
-      </div>
-
-      {/* ── Hidden file input ── */}
-      <input ref={fileRef} type="file" accept="image/*" style={{ display: 'none' }} onChange={handleFileChange} />
-
-      {/* ── Navbar ── */}
-      <nav style={{
-        background: '#0f172a', borderBottom: '1px solid #1e293b',
-        position: 'sticky', top: 0, zIndex: 50,
-        padding: '0 24px', height: 64,
-        display: 'flex', alignItems: 'center', justifyContent: 'space-between'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
-          <div style={{
-            width: 32, height: 32, background: '#2563eb',
-            borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center',
-            fontWeight: 700, fontSize: 14
-          }}>S</div>
-          <span style={{ fontWeight: 800, letterSpacing: '-0.05em', fontSize: 18, textTransform: 'uppercase' }}>
-            Sprite Master <span style={{ color: '#3b82f6' }}>Ultra</span>
-          </span>
-        </div>
-        <div style={{ display: 'flex', alignItems: 'center', gap: 16 }}>
-          <div style={{ display: 'flex', background: '#1e293b', padding: 4, borderRadius: 8 }}>
-            <button
-              onClick={() => setCurrentTab('slicer')}
-              style={{
-                padding: '6px 20px', borderRadius: 6, border: 'none',
-                fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
-                background: currentTab === 'slicer' ? '#2563eb' : 'transparent',
-                color: currentTab === 'slicer' ? '#fff' : '#94a3b8',
-                transition: 'all 0.15s'
-              }}
-            >CORTADOR</button>
-            <button
-              onClick={() => setCurrentTab('generator')}
-              style={{
-                padding: '6px 20px', borderRadius: 6, border: 'none',
-                fontSize: 11, fontWeight: 700, textTransform: 'uppercase',
-                background: currentTab === 'generator' ? '#2563eb' : 'transparent',
-                color: currentTab === 'generator' ? '#fff' : '#94a3b8',
-                transition: 'all 0.15s'
-              }}
-            >GERADOR IA</button>
+    <div style={{ display: 'flex', flexDirection: 'row-reverse', height: '100vh', background: '#000', color: '#fff', overflow: 'hidden' }}>
+      
+      {/* ── LOADING OVERLAY ── */}
+      {isProcessing && (
+        <div style={{ position: 'fixed', inset: 0, zIndex: 9999, background: 'rgba(0,0,0,0.85)', display: 'flex', alignItems: 'center', justifyContent: 'center', flexDirection: 'column', gap: 24, backdropFilter: 'blur(8px)' }}>
+          <div style={{ width: 80, height: 80, position: 'relative' }}>
+            <svg viewBox="0 0 80 80" style={{ width: 80, height: 80, animation: 'spin 1.2s linear infinite' }}>
+              <circle cx="40" cy="40" r="36" fill="none" stroke="#111" strokeWidth="4" />
+              <circle cx="40" cy="40" r="36" fill="none" stroke="#fff" strokeWidth="4" strokeDasharray="180" strokeDashoffset="60" strokeLinecap="round" />
+            </svg>
+            <span style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900, fontSize: 24, color: '#fff' }}>S</span>
           </div>
+          <span className="text-mono" style={{ fontSize: 13, color: '#fff', textTransform: 'uppercase', letterSpacing: '0.2em' }}>Processando...</span>
         </div>
-      </nav>
+      )}
 
-      {/* ── Main Content ── */}
-      <main style={{ maxWidth: 1400, margin: '0 auto', padding: 24 }}>
+      {/* ── SIDEBAR (RIGHT) ── */}
+      <aside style={{ width: 320, borderLeft: '1px solid #111', background: '#020202', display: 'flex', flexDirection: 'column', padding: '32px 0', flexShrink: 0 }}>
+        <div style={{ padding: '0 24px', marginBottom: 40, display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ width: 32, height: 32, background: '#fff', color: '#000', borderRadius: 8, display: 'flex', alignItems: 'center', justifyContent: 'center', fontWeight: 900 }}>S</div>
+          <span style={{ fontWeight: 800, fontSize: 13, letterSpacing: '0.1em', color: '#fff' }}>SUPER SPRITE INTERN</span>
+        </div>
 
-        {/* ── SLICER TAB ── */}
-        {currentTab === 'slicer' && (
-          <div style={{ display: 'grid', gridTemplateColumns: '340px 1fr', gap: 32 }}>
 
-            {/* ─── LEFT SIDEBAR ─── */}
-            <aside style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
-              <div style={{
-                background: '#0f172a', border: '1px solid #1e293b',
-                padding: 24, borderRadius: 24,
-                display: 'flex', flexDirection: 'column', gap: 24
-              }}>
-                {/* Panel header */}
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid #1e293b', paddingBottom: 16 }}>
-                  <h3 style={{ margin: 0, fontSize: 10, fontWeight: 900, color: '#3b82f6', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                    Painel de Estúdio
-                  </h3>
-                  {hasImage && (
-                    <button
-                      onClick={triggerImport}
-                      style={{ background: 'none', border: 'none', color: '#ef4444', fontSize: 10, fontWeight: 700, textTransform: 'uppercase', cursor: 'pointer' }}
-                    >Mudar Imagem</button>
-                  )}
+
+        {/* ── SIDEBAR DYNAMIC CONTROLS ── */}
+        <div style={{ flex: 1, padding: '24px', borderTop: '1px solid #111', marginTop: 16 }}>
+          {!sp.sourceImage && (
+             <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+                <h4 style={sideHeader}>Ações Rápidas</h4>
+                <button onClick={() => fileRef.current?.click()} style={{ ...sidebarBtnMain, background: 'linear-gradient(135deg, #fff, #ddd)', color: '#000' }}>Importar Primeiro Sprite</button>
+                <div style={{ height: 100, display: 'flex', alignItems: 'center', justifyContent: 'center', textAlign: 'center', color: '#fff', fontSize: 11, opacity: 0.3, border: '1px dashed #222', borderRadius: 16, marginTop: 8, padding: 12 }}>
+                   Painel de configurações aparecerá após o carregamento
                 </div>
+             </div>
+          )}
 
-                {/* Object / Action naming */}
-                <div style={{ background: '#020617', padding: 16, borderRadius: 16, border: '1px solid #1e293b', display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
-                    <div>
-                      <label style={{ fontSize: 9, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginLeft: 4 }}>Objeto (Opcional)</label>
-                      <input
-                        type="text" value={objName} onChange={e => setObjName(e.target.value)}
-                        placeholder="Ex: Player"
-                        style={inputStyle}
-                      />
-                    </div>
-                    <div>
-                      <label style={{ fontSize: 9, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginLeft: 4 }}>Ação (Opcional)</label>
-                      <input
-                        type="text" value={actionName} onChange={e => setActionName(e.target.value)}
-                        placeholder="Ex: Walk"
-                        style={inputStyle}
-                      />
-                    </div>
-                  </div>
-                  <p style={{ fontSize: 9, color: '#475569', margin: 0, padding: '0 4px', fontStyle: 'italic' }}>
-                    Se não preencher, os ficheiros serão exportados apenas como 00.png, 01.png, etc.
-                  </p>
+          {sp.sourceImage && editingIdx === null && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+               <h4 style={sideHeader}>Ações Rápidas</h4>
+               <button onClick={() => { if(confirm('Limpar sprite atual?')) sp.clearAll(); }} style={{ ...sidebarBtnMain, background: '#111', color: '#ef4444', border: '1px solid #222' }}>Limpar Sprite</button>
+               <button onClick={() => fileRef.current?.click()} style={sidebarBtnMain}>Importar Sprite</button>
+               <button onClick={sp.fillTo30Frames} style={{ ...sidebarBtnMain, background: 'linear-gradient(135deg, #2563eb, #1d4ed8)', color: '#fff', border: 'none', boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)', marginTop: 8 }}>Preencher até 30 Frames</button>
+               
+               <div style={{ marginTop: 24, borderTop: '1px solid #111', paddingTop: 24 }}>
+                  <h4 style={sideHeader}>Exportação Profissional</h4>
+                  <label style={sideLabel}>Nome da Ação (Pasta)</label>
+                  <input 
+                    type="text" 
+                    value={actionName} 
+                    onChange={e => setActionName(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '_'))}
+                    placeholder="ex: andando_calmo"
+                    style={inputStyle}
+                  />
+                  <button onClick={downloadZip} style={exportBtnStyle}>Exportar ZIP</button>
+               </div>
+
+                <div style={{ marginTop: 24, borderTop: '1px solid #111', paddingTop: 24 }}>
+                   <h4 style={sideHeader}>Composição de Camadas</h4>
+                   <button onClick={() => accessoryRef.current?.click()} style={{ ...sidebarBtnMain, background: '#111', border: '1px solid #333' }}>Compor Acessório (Folha)</button>
+                   <input type="file" ref={accessoryRef} style={{ display: 'none' }} accept="image/*" onChange={handleAccessoryFile} />
+                   
+                   <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: '#fff', cursor: 'pointer', marginTop: 12 }}>
+                      <input type="checkbox" checked={autoRemoveLayerBg} onChange={e => setAutoRemoveLayerBg(e.target.checked)} />
+                      Limpar fundo do acessório
+                   </label>
+
+                   <div style={{ display: 'flex', flexDirection: 'column', gap: 12, marginTop: 16 }}>
+                      <div>
+                        <label style={sideLabel}>Offset X</label>
+                        <input type="number" value={layerOffsetX} onChange={e => setLayerOffsetX(Number(e.target.value))} style={inputStyle} />
+                      </div>
+                      <div>
+                        <label style={sideLabel}>Offset Y</label>
+                        <input type="number" value={layerOffsetY} onChange={e => setLayerOffsetY(Number(e.target.value))} style={inputStyle} />
+                      </div>
+                   </div>
+                   <div className="text-mono" style={{ fontSize: 10, color: '#fff', opacity: 0.3, marginTop: 12, textAlign: 'center' }}>
+                      A folha de acessório deve usar a mesma grade do personagem.
+                   </div>
                 </div>
+            </div>
+          )}
 
-                {/* Grid config */}
-                <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-                  <label style={{ fontSize: 9, fontWeight: 700, color: '#64748b', textTransform: 'uppercase', marginLeft: 4 }}>Configuração da Grelha</label>
-                  <div style={{ display: 'flex', gap: 8 }}>
-                    <select
-                      onChange={handleGridSelect}
-                      style={{ ...inputStyle, flex: 1, cursor: 'pointer' }}
-                    >
-                      {GRID_PRESETS.map(p => (
-                        <option key={p.label} value={`${p.cols},${p.rows}`}>{p.label}</option>
+          {sp.sourceImage && editingIdx !== null && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+               <button onClick={() => setEditingIdx(null)} style={{ ...sidebarBtnMain, background: '#111', color: '#fff', border: '1px solid #222' }}>← Voltar à Grade</button>
+               <h4 style={sideHeader}>Ferramentas</h4>
+               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8 }}>
+                  <ToolBtn active={tool === 'brush'} label="Pincel" icon="🖌" hotkey="C" onClick={() => setTool('brush')} />
+                  <ToolBtn active={tool === 'eraser'} label="Borracha" icon="⌫" hotkey="B" onClick={() => setTool('eraser')} />
+                  <ToolBtn active={tool === 'colorEraser'} label="Limpa Brancos" icon="🧹" hotkey="W" onClick={() => setTool('colorEraser')} />
+                  <ToolBtn active={tool === 'eyedropper'} label="Conta-gotas" icon="💧" hotkey="Z" onClick={() => setTool('eyedropper')} />
+               </div>
+               <SliderRow label="Tamanho do Pincel" val={brushSize} min={1} max={100} onChange={setBrushSize} />
+               {tool === 'colorEraser' && <SliderRow label="Sensibilidade" val={tolerance} min={1} max={255} onChange={setTolerance} />}
+               {tool === 'brush' && (
+                 <div style={{ marginTop: 8 }}>
+                    <label style={sideLabel}>Cor do Pincel</label>
+                    <div style={{ display: 'flex', gap: 8, marginTop: 8, alignItems: 'center' }}>
+                      <input type="color" value={brushColor} onChange={e => setBrushColor(e.target.value)} style={{ width: 40, height: 36, background: 'none', border: '1px solid #222', borderRadius: 8, cursor: 'pointer', padding: 2 }} />
+                      <span className="text-mono" style={{ fontSize: 12, color: '#fff' }}>{brushColor}</span>
+                    </div>
+                    <div style={{ display: 'flex', gap: 4, marginTop: 8, flexWrap: 'wrap' }}>
+                      {['#ffffff','#000000','#ef4444','#f59e0b','#22c55e','#3b82f6','#8b5cf6','#ec4899'].map(c => (
+                        <button key={c} onClick={() => setBrushColor(c)} style={{ width: 22, height: 22, borderRadius: 6, border: brushColor === c ? '2px solid #fff' : '1px solid #222', background: c, cursor: 'pointer' }} />
                       ))}
-                    </select>
-                    <button
-                      onClick={detectGridIA}
-                      title="Auto-Detectar Grelha"
-                      style={{
-                        background: '#4f46e5', border: 'none', borderRadius: 12,
-                        padding: '0 12px', color: '#fff', cursor: 'pointer',
-                        fontSize: 16, display: 'flex', alignItems: 'center'
-                      }}
-                    >⚡</button>
-                  </div>
-                </div>
+                    </div>
+                 </div>
+               )}
+               <div className="text-mono" style={{ fontSize: 11, color: '#fff', marginTop: 16, lineHeight: 1.8, textAlign: 'center' }}>
+                 B=Borracha • C=Pincel • W=Limpa • Z=Gotas<br/>
+                 Ctrl+Z=Desfazer • R=Resetar
+               </div>
+            </div>
+          )}
+        </div>
+      </aside>
 
-                {/* Sliders */}
-                <div style={{ background: '#020617', padding: 20, borderRadius: 16, border: '1px solid #1e293b', display: 'flex', flexDirection: 'column', gap: 16 }}>
-                  <h4 style={{ margin: 0, fontSize: 10, fontWeight: 900, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.1em', textAlign: 'center', borderBottom: '1px solid #1e293b', paddingBottom: 8, fontStyle: 'italic' }}>
-                    Ajustes de Matriz (Pixéis)
-                  </h4>
+      {/* ── MAIN ── */}
+      <main style={{ flex: 1, display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+        <header style={{ height: 60, borderBottom: '1px solid #111', background: '#050505', display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0 32px', flexShrink: 0, zIndex: 10 }}>
+          <span className="text-mono" style={{ fontSize: 12, fontWeight: 800, color: '#fff' }}>{activeSpriteInfo.toUpperCase()}</span>
+          <span style={{ fontSize: 14, fontWeight: 900, letterSpacing: '0.1em', color: '#fff' }}>
+            {editorActive ? `EDITOR — FRAME #${editingIdx + 1}` : 'PROCESSAMENTO GLOBAL'}
+          </span>
+          {!sp.sourceImage && <button onClick={() => fileRef.current?.click()} style={{ ...iconBtnSmall, width: 'auto', padding: '0 16px', fontSize: 11 }}>Carregar Primeiro Sprite</button>}
+          {sp.sourceImage && <div style={{ width: 100 }} />}
+        </header>
 
-                  {/* FIX FLICKER */}
-                  <button
-                    onClick={() => sp.runAutoFixFlicker(params)}
-                    style={{
-                      width: '100%', background: 'rgba(6,78,59,0.4)', border: '1px solid rgba(16,185,129,0.3)',
-                      borderRadius: 12, padding: '10px 0', color: '#34d399', fontWeight: 900,
-                      fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.1em', cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8
-                    }}
-                  >★ FIX FLICKER (Algoritmo Rápido)</button>
-
-                  {/* Guidelines checkbox */}
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 10, color: '#94a3b8', cursor: 'pointer' }}>
-                    <input
-                      type="checkbox" checked={sp.showGuidelines}
-                      onChange={e => sp.setShowGuidelines(e.target.checked)}
-                      style={{ width: 16, height: 16 }}
-                    />
-                    Mostrar Guias de Alinhamento (10% Z)
-                  </label>
-
-                  {/* Anti-Bleed */}
-                  <SliderRow label="Anti-Bleed (Bordas)" val={params.bleed} min={0} max={10} color="#94a3b8"
-                    onChange={v => upParam('bleed', v)} />
-                  {/* Noise */}
-                  <SliderRow label="Filtro de Ruído (Artefactos)" val={params.noise} min={0} max={8} color="#34d399"
-                    onChange={v => upParam('noise', v)} />
-                  {/* Stabilize */}
-                  <SliderRow label="Estabilização Local" val={params.stabilize} min={0} max={100} color="#94a3b8"
-                    onChange={v => upParam('stabilize', v)} displayVal={`${params.stabilize}%`} />
-                  {/* Edge Blur */}
-                  <SliderRow label="Suavizar Bordas (Blur)" val={params.blur} min={0} max={5} color="#94a3b8"
-                    onChange={v => upParam('blur', v)} />
-                  {/* Outline */}
-                  <SliderRow label="Contorno (px)" val={params.outline} min={0} max={5} color="#94a3b8"
-                    onChange={v => upParam('outline', v)} displayVal={`${params.outline}px`} />
-                </div>
-
-                {/* Magic BG Removal */}
-                <div style={{ background: '#020617', padding: 20, borderRadius: 16, border: '1px solid #1e293b', display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <h4 style={{ margin: 0, fontSize: 10, fontWeight: 900, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.1em', textAlign: 'center', borderBottom: '1px solid #1e293b', paddingBottom: 8 }}>
-                    Limpeza de Fundo
-                  </h4>
-                  <div>
-                    <label style={{ fontSize: 9, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', display: 'block', marginBottom: 4 }}>Intensidade Mágica</label>
-                    <select
-                      value={magicIntensity}
-                      onChange={e => {
-                        const v = Number(e.target.value) as 15 | 30 | 50;
-                        setMagicIntensity(v);
-                        sp.setMagicTolerance(v);
-                      }}
-                      style={{ ...inputStyle, width: '100%', cursor: 'pointer' }}
-                    >
-                      <option value={15}>Baixa (Preserva Detalhes)</option>
-                      <option value={30}>Média (Recomendado)</option>
-                      <option value={50}>Alta (Agressiva)</option>
-                    </select>
-                  </div>
-                  <button
-                    onClick={() => sp.runMagicBgRemoval(params)}
-                    style={{
-                      width: '100%', background: 'rgba(147,51,234,0.2)', border: '1px solid rgba(168,85,247,0.3)',
-                      borderRadius: 12, padding: '12px 0', color: '#c084fc', fontWeight: 900,
-                      fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.1em', cursor: 'pointer',
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8
-                    }}
-                  >✦ Remover Fundo Mágico (Rápido)</button>
-                  {/* AI Button */}
-                  <button
-                    onClick={() => sp.runAiBgRemoval(params)}
-                    disabled={sp.isAiProcessing}
-                    style={{
-                      width: '100%', background: 'rgba(14,165,233,0.15)', border: '1px solid rgba(56,189,248,0.3)',
-                      borderRadius: 12, padding: '12px 0', color: '#38bdf8', fontWeight: 900,
-                      fontSize: 9, textTransform: 'uppercase', letterSpacing: '0.1em',
-                      cursor: sp.isAiProcessing ? 'not-allowed' : 'pointer',
-                      opacity: sp.isAiProcessing ? 0.6 : 1,
-                      display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8
-                    }}
-                  >🤖 Remover com IA (Photoshop-Quality)</button>
-                  {sp.isAiProcessing && (
-                    <div style={{ width: '100%' }}>
-                      <div style={{ fontSize: 9, color: '#38bdf8', textAlign: 'center', marginBottom: 4 }}>
-                        Processando... {Math.round(sp.aiProgress * 100)}%
+        <section style={{ flex: 1, overflowY: 'auto' }}>
+            <div style={{ display: editingIdx === null ? 'grid' : 'flex', gridTemplateColumns: '1fr 340px', gap: 32, padding: 32 }}>
+              
+              {editingIdx === null ? (
+                <>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
+                    {sp.sourceImage ? (
+                      <FrameGrid frames={sp.activeFrames} deletedFrames={sp.deletedFrames} showGuidelines={sp.showGuidelines} onToggleExclusion={sp.toggleExclusion} onDelete={sp.deleteFrame} onRestore={sp.restoreFrame} onDuplicate={sp.duplicateFrame} onReorder={sp.reorderFrames} onView={setEditingIdx}  />
+                    ) : (
+                      <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', height: '60vh', opacity: 0.15 }}>
+                         <div style={{ fontSize: 120, marginBottom: 24 }}>📁</div>
+                         <h2 style={{ fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.4em', fontSize: 24 }}>Aguardando Sprite</h2>
                       </div>
-                      <div style={{ height: 4, background: '#1e293b', borderRadius: 4, overflow: 'hidden' }}>
-                        <div style={{
-                          height: '100%', background: '#38bdf8', borderRadius: 4,
-                          width: `${sp.aiProgress * 100}%`, transition: 'width 0.3s'
-                        }} />
+                    )}
+                  </div>
+                  <aside style={{ position: 'sticky', top: 0, display: 'flex', flexDirection: 'column', gap: 20, opacity: sp.sourceImage ? 1 : 0.4, pointerEvents: sp.sourceImage ? 'auto' : 'none' }}>
+                    <AnimationPreview frames={sp.activeFrames.filter(f => !f.excluded)} showGuidelines={sp.showGuidelines} />
+                    
+                    <div className="glass-panel" style={{ padding: 20, display: 'flex', flexDirection: 'column', gap: 24 }}>
+                      <div>
+                        <h5 style={sideHeader}>Grelha de Importação</h5>
+                        <div style={{ display: 'flex', gap: 10 }}>
+                          <select onChange={e => { const [c,r] = e.target.value.split(',').map(Number); applyPreset(c,r); }} style={{ ...selectStyle, flex: 1 }}>
+                              {GRID_PRESETS.map(p => <option key={p.label} value={`${p.cols},${p.rows}`}>{p.label}</option>)}
+                          </select>
+                          <button onClick={detectGridIA} style={iconBtnSmall} title="Auto-detectar melhor grade">⚡</button>
+                        </div>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: 10, fontSize: 13, color: '#fff', cursor: 'pointer', marginTop: 12 }}>
+                          <input type="checkbox" checked={sp.showGuidelines} onChange={e => sp.setShowGuidelines(e.target.checked)} />
+                          Guias Visuais de Grade
+                        </label>
+                      </div>
+
+                      <div style={{ borderTop: '1px solid #222', paddingTop: 20 }}>
+                        <h5 style={sideHeader}>Controle de Processamento</h5>
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                          <SliderRow label="Anti-Bleed" val={params.bleed} min={0} max={10} onChange={(v: number) => upParam('bleed', v)} />
+                          <SliderRow label="Anti-Aliasing" val={params.blur} min={0} max={10} onChange={(v: number) => upParam('blur', v)} />
+                          <SliderRow label="Contorno" val={params.outline} min={0} max={5} onChange={(v: number) => upParam('outline', v)} />
+                          <SliderRow label="Ruído" val={params.noise} min={0} max={8} onChange={(v: number) => upParam('noise', v)} />
+                          <SliderRow label="Estabilidade" val={params.stabilize} min={0} max={100} onChange={(v: number) => upParam('stabilize', v)} displayVal={`${params.stabilize}%`} />
+                        </div>
+                      </div>
+
+                      <div style={{ borderTop: '1px solid #222', paddingTop: 20 }}>
+                        <h5 style={sideHeader}>Limpeza Inteligente</h5>
+                        <div style={{ display: 'flex', gap: 8 }}>
+                            <select value={magicIntensity} onChange={e => { setMagicIntensity(Number(e.target.value) as any); sp.setMagicTolerance(Number(e.target.value)); }} style={{ ...selectStyle, flex: 1 }}>
+                                <option value={15}>Fraco</option>
+                                <option value={30}>Médio</option>
+                                <option value={50}>Forte</option>
+                            </select>
+                            <button onClick={() => { setIsProcessing(true); setTimeout(() => { sp.runMagicBgRemoval(params); setIsProcessing(false); }, 50); }} style={actionBtnStyle}>Limpar</button>
+                        </div>
+                        <button onClick={() => { setIsProcessing(true); setTimeout(() => { sp.runAutoFixFlicker(params); setIsProcessing(false); }, 50); }} style={{ ...actionBtnStyle, width: '100%', marginTop: 8, padding: '12px' }}>★ Corrigir Flicker Global</button>
                       </div>
                     </div>
-                  )}
-                </div>
-
-                {/* Export */}
-                <div style={{ background: 'rgba(30,58,138,0.1)', padding: 20, borderRadius: 16, border: '1px solid rgba(59,130,246,0.2)', display: 'flex', flexDirection: 'column', gap: 12 }}>
-                  <label style={{ fontSize: 9, fontWeight: 700, color: '#60a5fa', textTransform: 'uppercase', display: 'block' }}>Formato de Saída</label>
-                  <select
-                    value={exportFormat}
-                    onChange={e => setExportFormat(e.target.value as typeof exportFormat)}
-                    style={{ ...inputStyle, width: '100%', cursor: 'pointer' }}
-                  >
-                    <option value="image/png">PNG (Transparente)</option>
-                    <option value="image/jpeg">JPG (Fundo Sólido)</option>
-                    <option value="image/webp">WEBP (Alta Compres.)</option>
-                  </select>
-                  <button
-                    onClick={downloadZip}
-                    style={{
-                      width: '100%', background: '#2563eb', border: 'none',
-                      borderRadius: 12, padding: '16px 0', color: '#fff', fontWeight: 900,
-                      fontSize: 11, textTransform: 'uppercase', letterSpacing: '0.1em', cursor: 'pointer',
-                    }}
-                  >Exportar ZIP</button>
-                </div>
-              </div>
-            </aside>
-
-            {/* ─── RIGHT: Frame Grid + Animation Preview ─── */}
-            <section style={{ display: 'flex', flexDirection: 'column', gap: 32 }}>
-
-              {/* Header bar */}
-              <div style={{
-                display: 'flex', justifyContent: 'space-between', alignItems: 'center',
-                background: '#0f172a', padding: 16, borderRadius: 24,
-                border: '1px solid #1e293b'
-              }}>
-                <h2 style={{ margin: 0, fontSize: 13, fontWeight: 700, color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '0.1em', fontStyle: 'italic', display: 'flex', alignItems: 'center', gap: 12 }}>
-                  <span style={{ width: 8, height: 24, background: '#3b82f6', borderRadius: 4, display: 'inline-block' }} />
-                  Gestão de Quadros
-                </h2>
-                <span style={{
-                  fontSize: 10, fontFamily: 'monospace', background: '#020617',
-                  color: '#60a5fa', padding: '6px 16px', borderRadius: 9999,
-                  border: '1px solid #1e293b', fontStyle: 'italic'
-                }}>{cellLabel}</span>
-              </div>
-
-              {/* Drop zone (shown when no image) */}
-              {!hasImage && (
-                <div
-                  onClick={triggerImport}
-                  onDrop={handleDrop}
-                  onDragOver={e => e.preventDefault()}
-                  style={{
-                    border: '2px dashed #1e293b', borderRadius: 24, padding: 64,
-                    textAlign: 'center', cursor: 'pointer',
-                    background: 'rgba(15,23,42,0.5)',
-                    display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 12,
-                    transition: 'all 0.2s'
-                  }}
-                >
-                  <svg width={48} height={48} fill="none" stroke="currentColor" viewBox="0 0 24 24" style={{ color: '#334155' }}>
-                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-                  </svg>
-                  <p style={{ fontSize: 16, fontWeight: 700, margin: 0 }}>Inicie o Processamento</p>
-                  <p style={{ fontSize: 12, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.1em', fontFamily: 'monospace', margin: 0 }}>Arraste o seu Spritesheet aqui</p>
-                </div>
-              )}
-
-              {/* Global AI Refiner Bar */}
-              {hasImage && sp.activeFrames.length > 0 && (
-                <div style={{
-                  background: 'linear-gradient(90deg, rgba(30,41,59,0.5), rgba(15,23,42,0.8))',
-                  padding: '12px 16px', borderRadius: 20, border: '1px solid #1e293b',
-                  display: 'flex', gap: 12, alignItems: 'center',
-                  boxShadow: '0 10px 30px rgba(0,0,0,0.3)',
-                  animation: 'fadeInSlide 0.5s ease-out',
-                }}>
-                  <div style={{ fontSize: 18 }}>🪄</div>
-                  <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 2 }}>
-                    <span style={{ fontSize: 9, fontWeight: 800, color: '#475569', textTransform: 'uppercase', letterSpacing: '0.1em' }}>
-                      Refinamento Global com IA
-                    </span>
-                    <input
-                      type="text"
-                      placeholder="Ex: agora coloque um chapéu no personagem..."
-                      value={globalPrompt}
-                      onChange={e => setGlobalPrompt(e.target.value)}
-                      style={{
-                        background: 'transparent', border: 'none', color: '#f1f5f9',
-                        fontSize: 13, outline: 'none', width: '100%',
-                        fontStyle: 'italic',
-                      }}
+                  </aside>
+                </>
+              ) : (
+                    <InlineEditor
+                      frame={sp.activeFrames.find(f => f.index === editingIdx)!}
+                      tool={tool} brushSize={brushSize} brushColor={brushColor} tolerance={tolerance}
+                      onUpdate={sp.updateFrameCanvas}
+                      onPickColor={setBrushColor}
+                      onSetTool={setTool}
+                      onApplyToAll={sp.applyAdjustmentsToAll}
                     />
-                  </div>
-                  <button
-                    onClick={() => {
-                      if (!globalPrompt) return;
-                      alert('Processando refinamento global via IA: ' + globalPrompt);
-                      // Here: call sp.runGlobalAiRefinement(globalPrompt)
-                    }}
-                    style={{
-                      background: globalPrompt ? '#3b82f6' : '#1e293b',
-                      color: '#fff', border: 'none', borderRadius: 12,
-                      padding: '8px 20px', fontSize: 11, fontWeight: 900,
-                      cursor: globalPrompt ? 'pointer' : 'default',
-                      transition: 'all 0.2s',
-                    }}
-                  >
-                    REFINAR TODOS ✨
-                  </button>
-                </div>
               )}
+            </div>
 
-              {/* Frame Grid */}
-              {hasImage && (
-                <FrameGrid
-                  frames={sp.activeFrames}
-                  deletedFrames={sp.deletedFrames}
-                  showGuidelines={sp.showGuidelines}
-                  onToggleExclusion={sp.toggleExclusion}
-                  onDelete={sp.deleteFrame}
-                  onRestore={sp.restoreFrame}
-                  onDuplicate={sp.duplicateFrame}
-                  onReorder={sp.reorderFrames}
-                  onView={(idx: number) => setEditingIndex(idx)}
-                />
-              )}
-
-              {/* Animation Preview */}
-              {sp.activeFrames.length > 0 && (
-                <AnimationPreview
-                  frames={sp.activeFrames.filter(f => !f.excluded)}
-                  showGuidelines={sp.showGuidelines}
-                />
-              )}
-            </section>
-          </div>
-        )}
-
-        {/* ── GENERATOR TAB ── */}
-        {currentTab === 'generator' && (
-          <GeneratorTab 
-            sourceImage={sp.sourceImage} 
-            uploadHistory={sp.uploadHistory}
-            selectedRef={sp.selectedRef}
-            onSelectRef={sp.setSelectedRef}
-            onUploadRef={sp.loadFile}
-          />
-        )}
+        </section>
       </main>
 
-      {/* ── Frame Editor Modal ── */}
-      <FrameEditorModal
-        frame={editingIndex !== null
-          ? (sp.activeFrames.find(f => f.index === editingIndex) ?? null)
-          : null
-        }
-        onClose={() => setEditingIndex(null)}
-        onSave={(frameIndex, newCanvas) => {
-          sp.updateFrameCanvas(frameIndex, newCanvas);
-          setEditingIndex(null);
-        }}
-        onApplyToAll={(adj) => {
-          sp.applyAdjustmentsToAll(adj);
-          setEditingIndex(null);
-        }}
-      />
+      <input ref={fileRef} type="file" hidden onChange={e => e.target.files?.[0] && sp.loadFile(e.target.files[0])} />
     </div>
   );
 }
 
-// ── Shared styles ──
-const inputStyle: React.CSSProperties = {
-  width: '100%',
-  background: '#1e293b',
-  border: '1px solid #334155',
-  borderRadius: 12,
-  padding: '10px 12px',
-  fontSize: 12,
-  color: '#f1f5f9',
-  outline: 'none',
-  marginTop: 4,
-};
+// ═══════════════════════════════════════════════
+// INLINE EDITOR (with Undo, Reset, Hotkeys)
+// ═══════════════════════════════════════════════
+type Adjustments = { brightness: number, contrast: number, saturation: number, hue: number };
+const DEFAULT_ADJ: Adjustments = { brightness: 100, contrast: 100, saturation: 100, hue: 0 };
 
-// ── Slider Row component ──
-function SliderRow({
-  label, val, min, max, color, onChange, displayVal
-}: {
-  label: string; val: number; min: number; max: number;
-  color: string; onChange: (v: number) => void; displayVal?: string;
+function InlineEditor({ frame, tool, brushSize, brushColor, tolerance, onUpdate, onPickColor, onSetTool, onApplyToAll }: {
+  frame: FrameState; tool: string; brushSize: number; brushColor: string; tolerance: number;
+  onUpdate: (idx: number, canvas: HTMLCanvasElement) => void;
+  onPickColor: (hex: string) => void;
+  onSetTool: (t: any) => void;
+  onApplyToAll?: (adj: Adjustments) => void;
 }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+  const isDrawing = useRef(false);
+  const backupStack = useRef<ImageData[]>([]);
+  const originalData = useRef<ImageData | null>(null);
+  const loadedIdx = useRef<number | null>(null);
+  const [adj, setAdj] = useState<Adjustments>(DEFAULT_ADJ);
+  const [mousePos, setMousePos] = useState({ x: 0, y: 0, visible: false });
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const adjIsDefault = adj.brightness === 100 && adj.contrast === 100 && adj.saturation === 100 && adj.hue === 0;
+  const filterStr = `brightness(${adj.brightness}%) contrast(${adj.contrast}%) saturate(${adj.saturation}%) hue-rotate(${adj.hue}deg)`;
+
+  // Load frame ONLY when switching to a different frame index
+  useEffect(() => {
+    if (!frame || !canvasRef.current) return;
+    if (loadedIdx.current === frame.index) return; // skip if same frame
+    loadedIdx.current = frame.index;
+    const ctx = canvasRef.current.getContext('2d', { willReadFrequently: true })!;
+    canvasRef.current.width = frame.canvas.width;
+    canvasRef.current.height = frame.canvas.height;
+    ctx.drawImage(frame.canvas, 0, 0);
+    originalData.current = ctx.getImageData(0, 0, canvasRef.current.width, canvasRef.current.height);
+    backupStack.current = [];
+  }, [frame]);
+
+  // Save state for undo
+  const pushUndo = useCallback(() => {
+    if (!canvasRef.current) return;
+    const ctx = canvasRef.current.getContext('2d', { willReadFrequently: true })!;
+    const snap = ctx.getImageData(0, 0, canvasRef.current.width, canvasRef.current.height);
+    backupStack.current.push(snap);
+    if (backupStack.current.length > 30) backupStack.current.shift();
+  }, []);
+
+  const syncToProcessor = useCallback(() => {
+    if (!canvasRef.current || !frame) return;
+    const out = document.createElement('canvas');
+    out.width = canvasRef.current.width;
+    out.height = canvasRef.current.height;
+    out.getContext('2d')!.drawImage(canvasRef.current, 0, 0);
+    onUpdate(frame.index, out);
+  }, [frame, onUpdate]);
+
+  const undo = useCallback(() => {
+    if (!canvasRef.current || backupStack.current.length === 0) return;
+    const prev = backupStack.current.pop()!;
+    canvasRef.current.getContext('2d')!.putImageData(prev, 0, 0);
+    syncToProcessor();
+  }, [syncToProcessor]);
+
+  const applyAdjustments = useCallback(() => {
+    if (!canvasRef.current) return;
+    const ctx = canvasRef.current.getContext('2d')!;
+    const tmp = document.createElement('canvas');
+    tmp.width = canvasRef.current.width;
+    tmp.height = canvasRef.current.height;
+    const tCtx = tmp.getContext('2d')!;
+    tCtx.filter = filterStr;
+    tCtx.drawImage(canvasRef.current, 0, 0);
+    
+    pushUndo();
+    ctx.clearRect(0, 0, canvasRef.current.width, canvasRef.current.height);
+    ctx.drawImage(tmp, 0, 0);
+    setAdj(DEFAULT_ADJ);
+    syncToProcessor();
+  }, [filterStr, pushUndo, syncToProcessor]);
+
+  const reset = useCallback(() => {
+    if (!canvasRef.current || !originalData.current) return;
+    pushUndo();
+    canvasRef.current.getContext('2d')!.putImageData(originalData.current, 0, 0);
+    setAdj(DEFAULT_ADJ);
+    syncToProcessor();
+  }, [pushUndo, syncToProcessor]);
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.target as HTMLElement).tagName === 'INPUT') return;
+      if (e.ctrlKey && e.key === 'z') { e.preventDefault(); undo(); return; }
+      switch(e.key.toLowerCase()) {
+        case 'b': onSetTool('eraser'); break;
+        case 'c': onSetTool('brush'); break;
+        case 'w': onSetTool('colorEraser'); break;
+        case 'z': if (!e.ctrlKey) onSetTool('eyedropper'); break;
+        case 'r': reset(); break;
+      }
+    };
+    window.addEventListener('keydown', handler);
+    return () => window.removeEventListener('keydown', handler);
+  }, [undo, reset, onSetTool]);
+
+  const getPos = (e: React.MouseEvent) => {
+    if (!canvasRef.current) return { x: 0, y: 0 };
+    const rect = canvasRef.current.getBoundingClientRect();
+    return {
+      x: (e.clientX - rect.left) * (canvasRef.current.width / rect.width),
+      y: (e.clientY - rect.top) * (canvasRef.current.height / rect.height),
+      screenX: e.clientX - rect.left,
+      screenY: e.clientY - rect.top,
+      scale: rect.width / canvasRef.current.width
+    };
+  };
+
+  const handleMouseMove = (e: React.MouseEvent) => {
+    if (!containerRef.current) return;
+    const containerRect = containerRef.current.getBoundingClientRect();
+    
+    setMousePos({ 
+      x: e.clientX - containerRect.left, 
+      y: e.clientY - containerRect.top, 
+      visible: true 
+    });
+    handleAction(e);
+  };
+
+  const handleAction = (e: React.MouseEvent) => {
+    if (!canvasRef.current || (tool !== 'eyedropper' && !isDrawing.current)) return;
+    const { x, y } = getPos(e);
+    const ctx = canvasRef.current.getContext('2d', { willReadFrequently: true })!;
+
+    if (tool === 'eyedropper') {
+      const data = ctx.getImageData(Math.round(x), Math.round(y), 1, 1).data;
+      onPickColor(`#${[data[0], data[1], data[2]].map(v => v.toString(16).padStart(2, '0')).join('')}`);
+      return;
+    }
+
+    if (tool === 'eraser') {
+      ctx.globalCompositeOperation = 'destination-out';
+      ctx.beginPath(); ctx.arc(x, y, brushSize / 2, 0, Math.PI * 2); ctx.fill();
+    } else if (tool === 'colorEraser') {
+       const radius = Math.floor(brushSize / 2);
+       const ix = Math.max(0, Math.floor(x - radius)), iy = Math.max(0, Math.floor(y - radius));
+       const w = Math.min(brushSize, canvasRef.current.width - ix);
+       const h = Math.min(brushSize, canvasRef.current.height - iy);
+       if (w <= 0 || h <= 0) return;
+       const imgData = ctx.getImageData(ix, iy, w, h);
+       for(let i = 0; i < imgData.data.length; i += 4) {
+          const pr = imgData.data[i], pg = imgData.data[i+1], pb = imgData.data[i+2], pa = imgData.data[i+3];
+          if (pa === 0) continue;
+          const brightness = (pr + pg + pb) / 3;
+          const saturation = Math.max(pr, pg, pb) - Math.min(pr, pg, pb);
+          const brightnessThreshold = 255 - tolerance;
+          if (brightness > brightnessThreshold && saturation < tolerance) {
+            imgData.data[i + 3] = 0;
+          }
+       }
+       ctx.putImageData(imgData, ix, iy);
+    } else {
+      ctx.globalCompositeOperation = 'source-over';
+      ctx.fillStyle = brushColor;
+      ctx.beginPath(); ctx.arc(x, y, brushSize / 2, 0, Math.PI * 2); ctx.fill();
+    }
+  };
+
+  const onDown = (e: React.MouseEvent) => {
+    pushUndo();
+    isDrawing.current = true;
+    handleAction(e);
+  };
+  const onEnd = () => { if (isDrawing.current) { isDrawing.current = false; syncToProcessor(); } };
+
   return (
-    <div>
-      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 9, fontWeight: 700, color, textTransform: 'uppercase', marginBottom: 8 }}>
-        <span>{label}</span>
-        <span>{displayVal ?? val}</span>
-      </div>
-      <input
-        type="range" className="custom-range"
-        min={min} max={max} value={val}
-        onChange={e => onChange(Number(e.target.value))}
-      />
+    <div style={{ display: 'flex', height: '100%', width: '100%', background: '#020202' }}>
+       {/* BARRA LATERAL ESQUERDA (AJUSTES) */}
+       <aside style={{ width: 300, borderRight: '1px solid #111', background: '#050505', padding: '40px 24px', display: 'flex', flexDirection: 'column', gap: 32, flexShrink: 0 }}>
+          <h4 style={sideHeader}>Ajustes de Imagem</h4>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 24 }}>
+             <SliderRangeRow label="Brilho" val={adj.brightness} min={0} max={200} displayVal={`${adj.brightness}%`} onChange={v => setAdj(prev => ({ ...prev, brightness: v }))} />
+             <SliderRangeRow label="Contraste" val={adj.contrast} min={0} max={200} displayVal={`${adj.contrast}%`} onChange={v => setAdj(prev => ({ ...prev, contrast: v }))} />
+             <SliderRangeRow label="Saturação" val={adj.saturation} min={0} max={200} displayVal={`${adj.saturation}%`} onChange={v => setAdj(prev => ({ ...prev, saturation: v }))} />
+             <SliderRangeRow label="Matriz (Hue)" val={adj.hue} min={-180} max={180} displayVal={`${adj.hue}°`} onChange={v => setAdj(prev => ({ ...prev, hue: v }))} />
+          </div>
+
+          <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: 12, borderTop: '1px solid #111', paddingTop: 32 }}>
+             <button onClick={undo} style={{ ...editorActionBtn, width: '100%' }}>↩ Desfazer [Ctrl+Z]</button>
+             <button onClick={reset} style={{ ...editorActionBtn, width: '100%' }}>↺ Resetar Original [R]</button>
+             {!adjIsDefault && (
+               <>
+                 <button onClick={applyAdjustments} style={{ ...editorActionBtn, width: '100%', background: '#fff', color: '#000', border: 'none', padding: '12px' }}>Aplicar Neste Quadro</button>
+                 {onApplyToAll && (
+                   <button onClick={() => { if(confirm('Aplicar a TODOS os quadros?')) { onApplyToAll(adj); setAdj(DEFAULT_ADJ); } }} style={{ ...editorActionBtn, width: '100%', borderColor: '#333' }}>Aplicar a Todos</button>
+                 )}
+                 <button onClick={() => setAdj(DEFAULT_ADJ)} style={{ ...editorActionBtn, width: '100%', color: '#ef4444', border: 'none' }}>Descartar</button>
+               </>
+             )}
+          </div>
+       </aside>
+
+       {/* ÁREA CENTRAL (FRAME) */}
+       <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center', position: 'relative', overflow: 'hidden', padding: 48 }}>
+           <div 
+             ref={containerRef}
+             onMouseEnter={() => setMousePos(p => ({ ...p, visible: true }))}
+             onMouseLeave={() => setMousePos(p => ({ ...p, visible: false }))}
+             style={{ width: '100%', height: '100%', maxWidth: '1000px', maxHeight: '800px', background: '#030303', border: '1px solid #111', borderRadius: 40, display: 'flex', alignItems: 'center', justifyContent: 'center', cursor: 'none', overflow: 'hidden', position: 'relative', boxShadow: '0 40px 100px rgba(0,0,0,0.8)' }}
+           >
+             <canvas 
+               ref={canvasRef} 
+               onMouseDown={onDown} 
+               onMouseMove={handleMouseMove} 
+               onMouseUp={onEnd} 
+               style={{ maxWidth: '95%', maxHeight: '95%', imageRendering: 'pixelated', background: 'url(data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAQAAAAECAYAAACp8Z5+AAAAAXNSR0IArs4c6QAAACpJREFUGFdjZEACjAABRhAAsigjowAjAwNQAF0AARgBApgAAsgAAXQBBAAkGQYEvlS9xwAAAABJRU5ErkJggg==)', filter: filterStr }} 
+             />
+
+             {mousePos.visible && (
+               <div style={{
+                 position: 'absolute',
+                 left: mousePos.x,
+                 top: mousePos.y,
+                 width: brushSize * (canvasRef.current ? (canvasRef.current.getBoundingClientRect().width / canvasRef.current.width) : 1),
+                 height: brushSize * (canvasRef.current ? (canvasRef.current.getBoundingClientRect().height / canvasRef.current.height) : 1),
+                 border: `2px solid ${tool === 'eraser' || tool === 'colorEraser' ? '#ef4444' : '#fff'}`,
+                 borderRadius: '50%',
+                 pointerEvents: 'none',
+                 transform: 'translate(-50%, -50%)',
+                 zIndex: 10
+               }} />
+             )}
+           </div>
+
+           <div className="text-mono" style={{ position: 'absolute', bottom: 24, left: '50%', transform: 'translateX(-50%)', fontSize: 11, color: '#fff', opacity: 0.2, textTransform: 'uppercase', letterSpacing: '0.1em' }}>
+              {tool === 'eyedropper' ? 'Clique para capturar cor' : 'Clique e arraste • B=Borracha C=Pincel W=Limpa Z=Gotas • R=Reseta'}
+           </div>
+       </div>
     </div>
   );
 }
+
+// ── Components ──
+function ToolBtn({ active, label, icon, hotkey, onClick }: { active: boolean, label: string, icon: string, hotkey: string, onClick: () => void }) {
+  return <button onClick={onClick} title={`${label} [${hotkey}]`} style={{ padding: '12px', background: active ? '#fff' : '#0a0a0a', color: active ? '#000' : '#fff', border: '1px solid #222', borderRadius: 12, fontSize: 14, cursor: 'pointer', display: 'flex', flexDirection: 'column', alignItems: 'center', gap: 6, transition: '0.2s', position: 'relative' }}>
+    <span>{icon}</span>
+    <span style={{ fontSize: 10, fontWeight: 900, textTransform: 'uppercase' }}>{label}</span>
+    <span style={{ position: 'absolute', top: 4, right: 6, fontSize: 9, fontWeight: 900, color: active ? '#fff' : '#000', background: active ? '#2563eb' : '#fff', padding: '1px 4px', borderRadius: 4 }}>{hotkey}</span>
+  </button>
+}
+
+function SliderRow({ label, val, min, max, onChange, displayVal }: { label: string, val: number, min: number, max: number, onChange: (v: number) => void, displayVal?: string }) {
+  const update = (delta: number) => {
+    onChange(Math.max(min, Math.min(max, val + delta)));
+  };
+  return <div style={{ marginBottom: 12 }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 6, fontSize: 13 }} className="text-mono">
+      <span style={{ color: '#fff' }}>{label}</span>
+      <span style={{ fontWeight: 900, color: '#fff' }}>{displayVal ?? val}</span>
+    </div>
+    <div style={{ display: 'flex', gap: 4 }}>
+      <button onClick={() => update(-10)} style={btnTiny}>-10</button>
+      <button onClick={() => update(-1)} style={btnTiny}>-1</button>
+      <button onClick={() => update(1)} style={btnTiny}>+1</button>
+      <button onClick={() => update(10)} style={btnTiny}>+10</button>
+    </div>
+  </div>
+}
+
+function SliderRangeRow({ label, val, min, max, onChange, displayVal }: { label: string, val: number, min: number, max: number, onChange: (v: number) => void, displayVal?: string }) {
+  return <div style={{ flex: 1 }}>
+    <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 8, fontSize: 13 }} className="text-mono">
+      <span style={{ color: '#fff' }}>{label}</span>
+      <span style={{ fontWeight: 900, color: '#fff' }}>{displayVal ?? val}</span>
+    </div>
+    <input 
+      type="range" 
+      min={min} 
+      max={max} 
+      value={val} 
+      onChange={e => onChange(Number(e.target.value))} 
+      className="custom-range"
+    />
+  </div>
+}
+
+// ── Styles ──
+const sideHeader: React.CSSProperties = { fontSize: 14, fontWeight: 900, textTransform: 'uppercase', letterSpacing: '0.1em', marginBottom: 16, color: '#fff' };
+const sideLabel: React.CSSProperties = { fontSize: 12, fontWeight: 900, textTransform: 'uppercase', color: '#fff' };
+const sidebarBtnMain: React.CSSProperties = { width: '100%', background: '#fff', color: '#000', border: 'none', borderRadius: 12, padding: '14px', fontSize: 12, fontWeight: 900, textTransform: 'uppercase', cursor: 'pointer', transition: '0.2s' };
+const actionBtnStyle: React.CSSProperties = { flex: 1, background: '#111', border: '1px solid #333', borderRadius: 10, padding: '10px', color: '#fff', fontSize: 11, fontWeight: 800, textTransform: 'uppercase', cursor: 'pointer' };
+const exportBtnStyle: React.CSSProperties = { width: '100%', background: '#fff', border: 'none', borderRadius: 14, padding: '14px', fontSize: 12, fontWeight: 900, color: '#000', textTransform: 'uppercase', cursor: 'pointer', marginTop: 10 };
+const selectStyle: React.CSSProperties = { background: '#111', border: '1px solid #333', borderRadius: 10, padding: '8px 12px', color: '#fff', fontSize: 12, outline: 'none' };
+const iconBtnSmall: React.CSSProperties = { background: '#fff', color: '#000', border: 'none', borderRadius: 10, width: 38, height: 38, fontWeight: 900, cursor: 'pointer' };
+const editorActionBtn: React.CSSProperties = { background: '#111', border: '1px solid #333', borderRadius: 10, padding: '8px 16px', color: '#fff', fontSize: 12, fontWeight: 800, cursor: 'pointer', transition: '0.2s' };
+const btnTiny: React.CSSProperties = { flex: 1, background: '#111', border: '1px solid #333', borderRadius: 8, padding: '8px 0', color: '#fff', fontSize: 11, fontWeight: 800, cursor: 'pointer', transition: '0.2s' };
+const inputStyle: React.CSSProperties = { width: '100%', background: '#111', border: '1px solid #333', borderRadius: 10, padding: '12px', color: '#fff', fontSize: 12, outline: 'none', marginTop: 12 };
