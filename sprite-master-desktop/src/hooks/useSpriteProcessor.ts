@@ -10,6 +10,7 @@ import {
   applyEdgeBlur,
   applyOutline,
   getAlignmentOffset,
+  getBottomPivotOffset,
   cloneCanvas,
 } from '../utils/imageProcessing';
 import type { GridParams, SpriteSlice } from '../utils/imageProcessing';
@@ -142,6 +143,32 @@ export function useSpriteProcessor() {
   const runAutoFixFlicker = useCallback((params: GridParams) => {
     reprocessFrames({ ...params, stabilize: 100 });
   }, [reprocessFrames]);
+
+  // ── Auto-Align Pivots (Feet grounding) ──
+  const runAutoAlignPivots = useCallback((params: GridParams) => {
+    setIsProcessing(true);
+    setTimeout(() => {
+      setFrames(prev => prev.map(f => {
+        if (f.deleted) return f;
+        
+        // 1. Calculate offset to ground the feet at 90% height
+        const { dx, dy } = getBottomPivotOffset(f.originalCanvas, 0.9);
+        
+        // 2. Update the original buffer (permanence)
+        const newOriginal = cloneCanvas(f.originalCanvas);
+        const oCtx = newOriginal.getContext('2d')!;
+        oCtx.clearRect(0, 0, newOriginal.width, newOriginal.height);
+        oCtx.drawImage(f.originalCanvas, Math.round(dx), Math.round(dy));
+        
+        // 3. Update the working canvas with current filters
+        const proc = cloneCanvas(newOriginal);
+        applyFilters(proc, params);
+        
+        return { ...f, originalCanvas: newOriginal, canvas: proc };
+      }));
+      setIsProcessing(false);
+    }, 50);
+  }, []);
 
   // ── Toggle exclude ──
   const toggleExclusion = useCallback((index: number) => {
@@ -326,6 +353,7 @@ export function useSpriteProcessor() {
     reprocessFrames,
     runMagicBgRemoval,
     runAutoFixFlicker,
+    runAutoAlignPivots,
     fillTo30Frames,
     compositeLayer,
     clearAll,

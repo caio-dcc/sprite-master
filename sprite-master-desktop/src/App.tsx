@@ -294,6 +294,7 @@ export default function App() {
                             <button onClick={() => { setIsProcessing(true); setTimeout(() => { sp.runMagicBgRemoval(params); setIsProcessing(false); }, 50); }} style={actionBtnStyle}>Limpar</button>
                         </div>
                         <button onClick={() => { setIsProcessing(true); setTimeout(() => { sp.runAutoFixFlicker(params); setIsProcessing(false); }, 50); }} style={{ ...actionBtnStyle, width: '100%', marginTop: 8, padding: '12px' }}>★ Corrigir Flicker Global</button>
+                        <button onClick={() => sp.runAutoAlignPivots(params)} style={{ ...actionBtnStyle, width: '100%', marginTop: 8, padding: '12px', background: 'linear-gradient(135deg, #10b981, #059669)', border: 'none', boxShadow: '0 4px 12px rgba(16, 185, 129, 0.2)' }}>★ Alinhar pelos Pés (Auto)</button>
                       </div>
                     </div>
                   </aside>

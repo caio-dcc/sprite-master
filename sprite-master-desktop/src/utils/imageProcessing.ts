@@ -397,6 +397,21 @@ export function getAlignmentOffset(
 }
 
 // ────────────────────────────────────────────────────────────
+// BOTTOM PIVOT ALIGNMENT (grounding)
+// ────────────────────────────────────────────────────────────
+export function getBottomPivotOffset(
+  canvas: HTMLCanvasElement,
+  groundHeightRatio: number = 0.9
+): { dx: number; dy: number } {
+  const bounds = getBoundingBox(canvas);
+  if (!bounds) return { dx: 0, dy: 0 };
+  const { minX, maxX, maxY } = bounds;
+  const dx = (canvas.width / 2) - (minX + (maxX - minX) / 2);
+  const dy = (canvas.height * groundHeightRatio) - maxY;
+  return { dx, dy };
+}
+
+// ────────────────────────────────────────────────────────────
 // CANVAS CLONE
 // ────────────────────────────────────────────────────────────
 export function cloneCanvas(src: HTMLCanvasElement): HTMLCanvasElement {
